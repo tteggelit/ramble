@@ -21,6 +21,7 @@ class Gromacs(ExecutableApplication):
 
     tags("molecular-dynamics", "hpc-benchmark")
 
+    version("2026.1", description="Version 2026.1 of Gromacs")
     version("2026.0", description="Version 2026.0 of Gromacs")
     version("2025.4", description="Version 2025.4 of Gromacs")
     version("2025.3", description="Version 2025.3 of Gromacs", preferred=True)
@@ -36,6 +37,26 @@ class Gromacs(ExecutableApplication):
     version("2024", description="Version 2024 of Gromacs")
     version("2019.6", description="Version 2019.6 of Gromacs")
 
+    variant(
+        "cuda",
+        default=False,
+        values=[True, False],
+        description="CUDA support variant",
+    )
+
+    variant(
+        "nvhpc",
+        default=False,
+        values=[True, False],
+        description="NVIDIA HPC SDK support variant",
+    )
+
+    with when("+nvhpc"):
+        conflict(
+            "~cuda",
+            msg="The nvhpc variant requires cuda to be enabled (+cuda)",
+        )
+
     with when("package_manager_family=spack"):
 
         define_compiler("gcc14", pkg_spec="gcc@14.2.0")
@@ -43,12 +64,20 @@ class Gromacs(ExecutableApplication):
         software_spec(
             "intel-mpi",
             pkg_spec="intel-oneapi-mpi@2021.17.2",
+            when=["~nvhpc"],
+        )
+
+        software_spec(
+            "openmpi",
+            pkg_spec="openmpi",
+            when=["+nvhpc"],
         )
 
         with default_args(compiler="gcc14"):
             software_spec(
                 "gromacs-{application::gromacs::version}",
-                pkg_spec="gromacs@{application::gromacs::version}",
+                pkg_spec="gromacs@{application::gromacs::version} "
+                + "{application::variant::cuda}",
             )
 
     software_spec(
@@ -76,7 +105,8 @@ class Gromacs(ExecutableApplication):
         "execute-gen",
         "{mdrun} {notunepme} -dlb {dlb} "
         + "{verbose} -resetstep {resetstep} -nsteps {nsteps} "
-        + "-s exp_input.tpr {additional_args}",
+        + "-s exp_input.tpr {nb_offload} {pme_offload} "
+        + "{bonded_offload} {update_offload} {additional_args}",
         use_mpi=True,
         output_capture=OUTPUT_CAPTURE.ALL,
     )
@@ -84,7 +114,8 @@ class Gromacs(ExecutableApplication):
         "execute",
         "{mdrun} {notunepme} -dlb {dlb} "
         + "{verbose} -resetstep {resetstep} -nsteps {nsteps} "
-        + "-s {input_path} {additional_args}",
+        + "-s {input_path} {nb_offload} {pme_offload} "
+        + "{bonded_offload} {update_offload} {additional_args}",
         use_mpi=True,
         output_capture=OUTPUT_CAPTURE.ALL,
     )
@@ -226,6 +257,136 @@ class Gromacs(ExecutableApplication):
             "water_33m",
         ],
     )
+    workload_group(
+        "pme_workloads",
+        workloads=[
+            "water_gmx50",
+            "water_bare",
+            "hecbiosim",
+            "benchpep",
+            "benchpep_h",
+            "benchmem",
+            "benchrib",
+            "stmv_pme",
+            "rnase_cubic",
+            "ion_channel",
+            "adh_dodec",
+            "water_33m",
+        ],
+    )
+    workload_group(
+        "rf_workloads",
+        workloads=[
+            "lignocellulose",
+            "stmv_rf",
+        ],
+    )
+    workload_group(
+        "gpu_bonded_workloads",
+        workloads=[
+            "water_bare",
+            "lignocellulose",
+            "hecbiosim",
+            "benchpep",
+            "benchpep_h",
+            "benchmem",
+            "benchrib",
+            "stmv_rf",
+            "stmv_pme",
+            "rnase_cubic",
+            "ion_channel",
+            "adh_dodec",
+        ],
+    )
+    workload_group(
+        "gpu_update_workloads",
+        workloads=[
+            "water_gmx50",
+            "water_bare",
+            "stmv_rf",
+            "stmv_pme",
+            "rnase_cubic",
+            "ion_channel",
+            "adh_dodec",
+            "water_33m",
+        ],
+    )
+
+    workload_variable(
+        "nb_offload",
+        default="",
+        description="Nonbonded force offload flag for mdrun",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "pme_offload",
+        default="",
+        description="PME long-range electrostatics offload flag for mdrun",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "bonded_offload",
+        default="",
+        description="Bonded interactions offload flag for mdrun",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "update_offload",
+        default="",
+        description="Integration and constraints update offload flag for mdrun",
+        workload_group="all_workloads",
+    )
+
+    with when("+cuda"):
+        workload_variable(
+            "nb_offload",
+            default="-nb gpu",
+            description="Offload nonbonded short-range forces to GPU",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "pme_offload",
+            default="{({n_ranks} > 1 and '-pme gpu -npme 1') or '-pme gpu'}",
+            description="Offload PME long-range electrostatics to GPU",
+            workload_group="pme_workloads",
+        )
+        workload_variable(
+            "bonded_offload",
+            default="-bonded gpu",
+            description="Offload bonded interactions to GPU",
+            workload_group="gpu_bonded_workloads",
+        )
+        workload_variable(
+            "update_offload",
+            default="-update gpu",
+            description="Offload integration and constraints to GPU",
+            workload_group="gpu_update_workloads",
+        )
+
+        environment_variable(
+            "GMX_ENABLE_DIRECT_GPU_COMM",
+            value="1",
+            description="Enable direct GPU-GPU communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_GPU_DD_COMMS",
+            value="1",
+            description="Enable GPU domain-decomposition halo communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_GPU_PME_PP_COMMS",
+            value="1",
+            description="Enable direct GPU PME-to-PP communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_FORCE_UPDATE_DEFAULT_GPU",
+            value="1",
+            description="Default update and constraints to GPU when supported",
+            workload_group="all_workloads",
+        )
 
     workload_variable(
         "additional_args",
@@ -470,3 +631,21 @@ class Gromacs(ExecutableApplication):
             units="",
             fom_type=FomType.CATEGORY,
         )
+
+    with when("+cuda"):
+        cuda_info_foms = (
+            "CUDA compiler",
+            "CUDA compiler flags",
+            "CUDA targets",
+            "CUDA driver",
+            "CUDA runtime",
+            "NVSHMEM",
+        )
+        for fom in cuda_info_foms:
+            figure_of_merit(
+                name=fom,
+                fom_regex=rf"\s*{fom}:\s*(?P<fom_value>.*)",
+                group_name="fom_value",
+                units="",
+                fom_type=FomType.INFO,
+            )
