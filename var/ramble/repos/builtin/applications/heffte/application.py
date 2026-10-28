@@ -29,11 +29,16 @@ class Heffte(ExecutableApplication):
     version("2.1.0", "Version 2.1.0 of the heFFTe library")
 
     with when("package_manager_family=spack"):
-        define_compiler("gcc14", pkg_spec="gcc@14.2.0")
-
         software_spec(
             "intel-mpi",
             pkg_spec="intel-oneapi-mpi@2021.17.2",
+            when=["~nvhpc"],
+        )
+
+        software_spec(
+            "openmpi",
+            pkg_spec="openmpi",
+            when=["+nvhpc"],
         )
 
         software_spec(
@@ -43,7 +48,6 @@ class Heffte(ExecutableApplication):
             + "{application::variant::fftw} "
             + "{application::variant::cuda} "
             + "{application::variant::mkl}",
-            compiler="gcc14",
         )
 
         required_package("heffte")
@@ -70,6 +74,19 @@ class Heffte(ExecutableApplication):
     )
 
     variant(
+        "nvhpc",
+        default=False,
+        values=[True, False],
+        description="NVIDIA HPC SDK support variant",
+    )
+
+    with when("+nvhpc"):
+        conflict(
+            "~cuda",
+            msg="The nvhpc variant requires cuda to be enabled (+cuda)",
+        )
+
+    variant(
         "mkl",
         default=False,
         values=[True, False],
@@ -87,7 +104,8 @@ class Heffte(ExecutableApplication):
         + "-{reorder} "
         + "-{reshape} "
         + "-n{num_runs} "
-        + "-{comm_method}",
+        + "-{comm_method} "
+        + "{mps}",
         use_mpi=True,
     )
 
@@ -102,7 +120,8 @@ class Heffte(ExecutableApplication):
         + "-{reorder} "
         + "-{reshape} "
         + "-n{num_runs} "
-        + "-{comm_method}",
+        + "-{comm_method} "
+        + "{mps}",
         use_mpi=True,
     )
 
@@ -133,7 +152,8 @@ class Heffte(ExecutableApplication):
             + "-{reorder} "
             + "-{reshape} "
             + "-n{num_runs} "
-            + "-{comm_method}",
+            + "-{comm_method} "
+            + "{mps}",
             use_mpi=True,
         )
 
@@ -285,6 +305,25 @@ class Heffte(ExecutableApplication):
         workload_group="all_workloads",
     )
 
+    workload_variable(
+        "mps",
+        default="",
+        values=["-mps", ""],
+        strict=True,
+        description="MPS flag for multi-GPU execution",
+        workload_group="3d_workloads",
+    )
+
+    with when("+cuda"):
+        workload_variable(
+            "mps",
+            default="-mps",
+            values=["-mps", ""],
+            strict=True,
+            description="MPS flag for multi-GPU execution",
+            workload_group="3d_workloads",
+        )
+
     figure_of_merit(
         "Time per run",
         fom_regex=r"Time per run:\s+(?P<run_time>[0-9]+\.[0-9]+)\s+.*",
@@ -319,7 +358,7 @@ class Heffte(ExecutableApplication):
 
         figure_of_merit(
             "Tolerance",
-            fom_regex=r"Tolerance:\\s+(?P<tolerance>[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
+            fom_regex=r"Tolerance:\s+(?P<tolerance>[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
             group_name="tolerance",
             units="",
             fom_type=FomType.INFO,
@@ -327,7 +366,7 @@ class Heffte(ExecutableApplication):
 
         figure_of_merit(
             "Maximum error",
-            fom_regex=r"Max error:\\s+(?P<error>[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
+            fom_regex=r"Max error:\s+(?P<error>[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)",
             group_name="error",
             units="",
             fom_type=FomType.INFO,
