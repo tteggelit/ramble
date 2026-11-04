@@ -117,11 +117,17 @@ class Relion(ExecutableApplication):
         )
 
         with default_args(compiler="gcc14"):
+            software_spec(
+                "wxwidgets",
+                pkg_spec="wxwidgets ~gui",
+            )
+
             with when("application_version@5.0.0:"):
                 with when("~altcpu"):
                     software_spec(
                         "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} ~gui "
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui ~ghostscript "
                         + "{application::variant::cuda} "
                         + "{application::variant::double} "
                         + "{application::variant::double-gpu} "
@@ -131,8 +137,9 @@ class Relion(ExecutableApplication):
 
                 with when("+altcpu"):
                     software_spec(
-                        "relion-altcpu-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} ~gui "
+                        "relion-{application::relion::version}",
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui ~ghostscript "
                         + "{application::variant::cuda} "
                         + "{application::variant::altcpu} "
                         + "{application::variant::double} "
@@ -141,11 +148,12 @@ class Relion(ExecutableApplication):
                         + "{application::variant::python}",
                     )
 
-            with when("application_version@:4.0.1"):
+            with when("application_version@4.0.0:4.0.1"):
                 with when("~altcpu"):
                     software_spec(
-                        "relion4-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} ~gui "
+                        "relion-{application::relion::version}",
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui ~ghostscript "
                         + "{application::variant::cuda} "
                         + "{application::variant::double} "
                         + "{application::variant::double-gpu} "
@@ -154,8 +162,33 @@ class Relion(ExecutableApplication):
 
                 with when("+altcpu"):
                     software_spec(
-                        "relion4-altcpu-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} ~gui "
+                        "relion-{application::relion::version}",
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui ~ghostscript "
+                        + "{application::variant::cuda} "
+                        + "{application::variant::altcpu} "
+                        + "{application::variant::double} "
+                        + "{application::variant::double-gpu} "
+                        + "{application::variant::mklfft}",
+                    )
+
+            with when("application_version@:3.1.4"):
+                with when("~altcpu"):
+                    software_spec(
+                        "relion-{application::relion::version}",
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui "
+                        + "{application::variant::cuda} "
+                        + "{application::variant::double} "
+                        + "{application::variant::double-gpu} "
+                        + "{application::variant::mklfft}",
+                    )
+
+                with when("+altcpu"):
+                    software_spec(
+                        "relion-{application::relion::version}",
+                        pkg_spec="relion@{application::relion::version} "
+                        + "~gui "
                         + "{application::variant::cuda} "
                         + "{application::variant::altcpu} "
                         + "{application::variant::double} "
@@ -173,7 +206,7 @@ class Relion(ExecutableApplication):
 
     executable(
         "print-version",
-        template="{relion_bin} --version",
+        template="relion_refine --version",
         use_mpi=False,
         output_capture=OUTPUT_CAPTURE.ALL,
     )
@@ -355,7 +388,7 @@ class Relion(ExecutableApplication):
 
     workload_variable(
         "output_prefix",
-        default="run",
+        default="./run",
         description="Output filename prefix for RELION run files",
         workload_group="all_workloads",
     )
@@ -436,9 +469,11 @@ class Relion(ExecutableApplication):
 
     workload_variable(
         "num_classes",
-        default="200",
-        description="Number of 2D classes (K)",
-        workload="class2d",
+        workload_defaults={
+            "class2d": "200",
+            "class3d": "6",
+        },
+        description="Number of classes (K)",
     )
 
     workload_variable(
@@ -448,13 +483,7 @@ class Relion(ExecutableApplication):
         workload_group="3d_workloads",
     )
 
-    workload_variable(
-        "num_classes",
-        default="6",
-        description="Number of 3D classes (K)",
-        workload="class3d",
-    )
-
+    # Matches: "RELION version: 5.0.1 (debug-build)"
     figure_of_merit(
         "RELION version",
         fom_regex=r"RELION version:\s*(?P<version>\S+)",
@@ -463,6 +492,7 @@ class Relion(ExecutableApplication):
         fom_type=FomType.INFO,
     )
 
+    # Matches: "Precision: BASE=double, VECTOR-ACC=single"
     figure_of_merit(
         "Precision",
         fom_regex=r"Precision:\s*(?P<precision>.*)",
@@ -475,6 +505,8 @@ class Relion(ExecutableApplication):
         Expander.expansion_str("experiment_run_dir"), "relion_stats.out"
     )
 
+    # Matches (in relion_stats.out):
+    #   "Iteration 1: e_step_time = 1353.0000 s, wall_time = 1670.2612 s"
     iter_fom_regex = (
         r"Iteration\s+(?P<iter>[0-9]+):\s+"
         + r"e_step_time\s*=\s*(?P<e_step_time>[0-9]+\.[0-9]+)\s*s"
@@ -507,6 +539,7 @@ class Relion(ExecutableApplication):
         contexts=["Expectation iteration"],
     )
 
+    # Matches (in relion_stats.out): "Completed iterations: 5"
     figure_of_merit(
         "Completed iterations",
         log_file=stats_file_str,
@@ -516,6 +549,7 @@ class Relion(ExecutableApplication):
         fom_type=FomType.MEASURE,
     )
 
+    # Matches (in relion_stats.out): "Total E-step time: 5125.8000 s"
     figure_of_merit(
         "Total E-step time",
         log_file=stats_file_str,
@@ -525,33 +559,7 @@ class Relion(ExecutableApplication):
         fom_type=FomType.TIME,
     )
 
-    figure_of_merit(
-        "Average E-step time",
-        log_file=stats_file_str,
-        fom_regex=r"Average E-step time:\s+(?P<avg_e_time>[0-9]+\.[0-9]+)\s+s",
-        group_name="avg_e_time",
-        units="s",
-        fom_type=FomType.TIME,
-    )
-
-    figure_of_merit(
-        "Min E-step time",
-        log_file=stats_file_str,
-        fom_regex=r"Min E-step time:\s+(?P<min_e_time>[0-9]+\.[0-9]+)\s+s",
-        group_name="min_e_time",
-        units="s",
-        fom_type=FomType.TIME,
-    )
-
-    figure_of_merit(
-        "Max E-step time",
-        log_file=stats_file_str,
-        fom_regex=r"Max E-step time:\s+(?P<max_e_time>[0-9]+\.[0-9]+)\s+s",
-        group_name="max_e_time",
-        units="s",
-        fom_type=FomType.TIME,
-    )
-
+    # Matches (in relion_stats.out): "Total iteration wall time: 6226.8765 s"
     figure_of_merit(
         "Total iteration wall time",
         log_file=stats_file_str,
@@ -561,23 +569,15 @@ class Relion(ExecutableApplication):
         fom_type=FomType.TIME,
     )
 
+    # Matches (in relion_stats.out): "Final resolution: 7.537472 Angstroms"
     figure_of_merit(
-        "Average iteration wall time",
+        "Final resolution",
         log_file=stats_file_str,
-        fom_regex=r"Average iteration wall time:\s+(?P<avg_wall_time>[0-9]+\.[0-9]+)\s+s",
-        group_name="avg_wall_time",
-        units="s",
-        fom_type=FomType.TIME,
+        fom_regex=r"Final resolution:\s+(?P<final_res>[0-9]+(?:\.[0-9]+)?)\s+Angstroms",
+        group_name="final_res",
+        units="Angstroms",
+        fom_type=FomType.MEASURE,
     )
-
-    with when("workload=refine3d"):
-        figure_of_merit(
-            "Final resolution",
-            fom_regex=r"Auto-refine: \+ Final resolution \(.*\) is:\s+(?P<final_res>[0-9]+(?:\.[0-9]+)?)",
-            group_name="final_res",
-            units="Angstroms",
-            fom_type=FomType.MEASURE,
-        )
 
     with when("workload_group=classification_workloads"):
         success_criteria(
@@ -596,30 +596,52 @@ class Relion(ExecutableApplication):
         )
 
     success_criteria(
+        "Final Resolution Produced",
+        mode="fom_comparison",
+        fom_name="Final resolution",
+        formula="float({value}) > 0",
+    )
+
+    # Rejects fatal error banners such as:
+    #   "in: /path/to/src/file.cpp, line 123\nERROR: ..." or "=== RELION_ERROR ==="
+    success_criteria(
         "No RELION Fatal Error",
         mode="string",
         anti_match=r"(?:RELION_ERROR|^ERROR:)",
     )
 
+    archive_pattern("{experiment_run_dir}/{output_prefix}_it*_optimiser.star")
+    archive_pattern("{experiment_run_dir}/{output_prefix}*_model.star")
+
     def _prepare_analysis(self, workspace, app_inst=None):
         """Parse RELION iteration timings from log output and checkpoint files."""
         exp_dir = self.expander.expand_var_name("experiment_run_dir")
         log_path = self.expander.expand_var_name("log_file")
-        output_prefix = self.expander.expand_var("{output_prefix}")
+        output_prefix = self.expander.expand_var_name("output_prefix")
 
+        # Matches:
+        #   " Expectation iteration 1 of 25" (class2d / class3d)
+        #   " Expectation iteration 1"       (refine3d)
         iter_header_re = re.compile(
             r"^\s*Expectation iteration\s+(?P<iter>[0-9]+)"
         )
+        # Matches the completed progress bar line at the end of an E-step:
+        #   "22.63/22.55 min ............................................................~~(,_,"> yum!"
         progress_done_re = re.compile(
             r"^\s*(?P<elapsed>[0-9]+(?:\.[0-9]+)?)/(?P<total>[0-9]+(?:\.[0-9]+)?)\s+"
-            + r"(?P<unit>sec|min|hrs)\s+\.+~~\(,_,\">"
+            + r"(?P<unit>sec|min|hrs)\s+\.+~~\(,_,\">\s+yum!"
+        )
+        # Matches (in *_model.star):
+        #   "_rlnCurrentResolution                       7.537472"
+        star_res_re = re.compile(
+            r"^\s*_rlnCurrentResolution\s+(?P<res>[0-9]+(?:\.[0-9]+)?)"
         )
         unit_scale = {"sec": 1.0, "min": 60.0, "hrs": 3600.0}
 
         e_step_times = {}
         if os.path.isfile(log_path):
             current_iter = None
-            with open(log_path, encoding="utf-8", errors="replace") as f:
+            with open(log_path, encoding="utf-8") as f:
                 for line in f:
                     m_iter = iter_header_re.match(line)
                     if m_iter:
@@ -639,8 +661,10 @@ class Relion(ExecutableApplication):
         star_pattern = os.path.join(
             exp_dir, f"{output_prefix}_it*_optimiser.star"
         )
+        prefix_base = os.path.basename(output_prefix)
+        # Matches checkpoint filenames such as: "run_it005_optimiser.star"
         star_iter_re = re.compile(
-            rf"{re.escape(output_prefix)}_it(?P<iter>[0-9]+)_optimiser\.star$"
+            rf"{re.escape(prefix_base)}_it(?P<iter>[0-9]+)_optimiser\.star$"
         )
         for path in glob.glob(star_pattern):
             m_star = star_iter_re.search(os.path.basename(path))
@@ -654,6 +678,22 @@ class Relion(ExecutableApplication):
                 if dt >= 0.0:
                     iter_wall_times[it] = dt
 
+        # Extract _rlnCurrentResolution from final model.star
+        final_res = None
+        n_iter_str = self.expander.expand_var_name("n_iter")
+        if n_iter_str.isdigit():
+            model_file = f"{output_prefix}_it{int(n_iter_str):03d}_model.star"
+        else:
+            model_file = f"{output_prefix}_model.star"
+        model_path = os.path.join(exp_dir, model_file)
+        if os.path.isfile(model_path):
+            with open(model_path, encoding="utf-8") as mf:
+                for line in mf:
+                    m_sr = star_res_re.match(line)
+                    if m_sr:
+                        final_res = m_sr.group("res")
+                        break
+
         all_iters = sorted(
             set(e_step_times.keys()) | set(iter_wall_times.keys())
         )
@@ -661,7 +701,7 @@ class Relion(ExecutableApplication):
             stats_path = os.path.join(exp_dir, "relion_stats.out")
             with open(stats_path, "w+", encoding="utf-8") as f:
                 for it in all_iters:
-                    e_val = e_step_times.get(it, iter_wall_times.get(it, 0.0))
+                    e_val = e_step_times.get(it, 0.0)
                     if it in iter_wall_times:
                         f.write(
                             f"Iteration {it}: e_step_time = {e_val:.4f} s, "
@@ -675,17 +715,12 @@ class Relion(ExecutableApplication):
                 f.write(f"Completed iterations: {len(all_iters)}\n")
 
                 if e_step_times:
-                    vals = list(e_step_times.values())
-                    total_e = sum(vals)
-                    avg_e = total_e / len(vals)
+                    total_e = sum(e_step_times.values())
                     f.write(f"Total E-step time: {total_e:.4f} s\n")
-                    f.write(f"Average E-step time: {avg_e:.4f} s\n")
-                    f.write(f"Min E-step time: {min(vals):.4f} s\n")
-                    f.write(f"Max E-step time: {max(vals):.4f} s\n")
 
                 if iter_wall_times:
-                    w_vals = list(iter_wall_times.values())
-                    total_w = sum(w_vals)
-                    avg_w = total_w / len(w_vals)
+                    total_w = sum(iter_wall_times.values())
                     f.write(f"Total iteration wall time: {total_w:.4f} s\n")
-                    f.write(f"Average iteration wall time: {avg_w:.4f} s\n")
+
+                if final_res is not None:
+                    f.write(f"Final resolution: {final_res} Angstroms\n")
