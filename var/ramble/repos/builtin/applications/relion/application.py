@@ -201,6 +201,7 @@ class Relion(ExecutableApplication):
     input_file(
         "plasmodium_ribosome",
         url="ftp://ftp.mrc-lmb.cam.ac.uk/pub/scheres/relion_benchmark.tar.gz",
+        sha256="c7d34a1c98ba956aa0a9b4534921c285c07bab4b9bd8ac3ee1604353c6cccd11",
         description="Plasmodium falciparum 80S ribosome standard RELION benchmark dataset (EMD-2660, 105,247 particles)",
     )
 
@@ -627,8 +628,9 @@ class Relion(ExecutableApplication):
         )
         # Matches the completed progress bar line at the end of an E-step:
         #   "22.63/22.55 min ............................................................~~(,_,"> yum!"
+        #   "  40/  40 sec ............................................................~~(,_,"> yum!"
         progress_done_re = re.compile(
-            r"^\s*(?P<elapsed>[0-9]+(?:\.[0-9]+)?)/(?P<total>[0-9]+(?:\.[0-9]+)?)\s+"
+            r"^\s*(?P<elapsed>[0-9]+(?:\.[0-9]+)?)/\s*(?P<total>[0-9]+(?:\.[0-9]+)?)\s+"
             + r"(?P<unit>sec|min|hrs)\s+\.+~~\(,_,\">\s+yum!"
         )
         # Matches (in *_model.star):

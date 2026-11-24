@@ -38,6 +38,13 @@ class Gromacs(ExecutableApplication):
     version("2019.6", description="Version 2019.6 of Gromacs")
 
     variant(
+        "mpi",
+        default=True,
+        values=[True, False],
+        description="Enable external MPI support (disable for built-in thread-MPI)",
+    )
+
+    variant(
         "cuda",
         default=False,
         values=[True, False],
@@ -51,10 +58,56 @@ class Gromacs(ExecutableApplication):
         description="NVIDIA HPC SDK support variant",
     )
 
+    variant(
+        "cufftmp",
+        default=False,
+        values=[True, False],
+        description="Enable multi-GPU FFT support with cuFFTMp",
+    )
+
+    variant(
+        "nvshmem",
+        default=False,
+        values=[True, False],
+        description="Enable NVSHMEM support for NVIDIA GPUs",
+    )
+
     with when("+nvhpc"):
         conflict(
             "~cuda",
             msg="The nvhpc variant requires cuda to be enabled (+cuda)",
+        )
+
+    with when("+cufftmp"):
+        conflict(
+            "~cuda",
+            msg="The cufftmp variant requires cuda to be enabled (+cuda)",
+        )
+        conflict(
+            "~mpi",
+            msg="The cufftmp variant requires external MPI (+mpi)",
+        )
+        conflict(
+            "application_version@:2021",
+            msg="cuFFTMp support requires GROMACS 2022 or newer",
+        )
+
+    with when("+nvshmem"):
+        conflict(
+            "~cuda",
+            msg="The nvshmem variant requires cuda to be enabled (+cuda)",
+        )
+        conflict(
+            "~mpi",
+            msg="The nvshmem variant requires external MPI (+mpi)",
+        )
+        conflict(
+            "+cufftmp",
+            msg="GROMACS NVSHMEM support conflicts with cuFFTMp (+cufftmp)",
+        )
+        conflict(
+            "application_version@:2023",
+            msg="NVSHMEM support requires GROMACS 2024 or newer",
         )
 
     with when("package_manager_family=spack"):
@@ -64,20 +117,40 @@ class Gromacs(ExecutableApplication):
         software_spec(
             "intel-mpi",
             pkg_spec="intel-oneapi-mpi@2021.17.2",
-            when=["~nvhpc"],
+            when=["+mpi", "~nvhpc"],
         )
 
         software_spec(
             "openmpi",
             pkg_spec="openmpi",
-            when=["+nvhpc"],
+            when=["+mpi", "+nvhpc"],
         )
 
         with default_args(compiler="gcc14"):
             software_spec(
                 "gromacs-{application::gromacs::version}",
                 pkg_spec="gromacs@{application::gromacs::version} "
+                + "{application::variant::mpi} "
                 + "{application::variant::cuda}",
+                when=["~cufftmp", "~nvshmem"],
+            )
+
+            software_spec(
+                "gromacs-{application::gromacs::version}",
+                pkg_spec="gromacs@{application::gromacs::version} "
+                + "{application::variant::mpi} "
+                + "{application::variant::cuda} "
+                + "{application::variant::cufftmp}",
+                when=["+cufftmp", "~nvshmem"],
+            )
+
+            software_spec(
+                "gromacs-{application::gromacs::version}",
+                pkg_spec="gromacs@{application::gromacs::version} "
+                + "{application::variant::mpi} "
+                + "{application::variant::cuda} "
+                + "{application::variant::nvshmem}",
+                when=["~cufftmp", "+nvshmem"],
             )
 
     software_spec(
@@ -101,24 +174,44 @@ class Gromacs(ExecutableApplication):
         use_mpi=False,
         output_capture=OUTPUT_CAPTURE.ALL,
     )
-    executable(
-        "execute-gen",
-        "{mdrun} {notunepme} -dlb {dlb} "
-        + "{verbose} -resetstep {resetstep} -nsteps {nsteps} "
-        + "-s exp_input.tpr {nb_offload} {pme_offload} "
-        + "{bonded_offload} {update_offload} {additional_args}",
-        use_mpi=True,
-        output_capture=OUTPUT_CAPTURE.ALL,
-    )
-    executable(
-        "execute",
-        "{mdrun} {notunepme} -dlb {dlb} "
-        + "{verbose} -resetstep {resetstep} -nsteps {nsteps} "
-        + "-s {input_path} {nb_offload} {pme_offload} "
-        + "{bonded_offload} {update_offload} {additional_args}",
-        use_mpi=True,
-        output_capture=OUTPUT_CAPTURE.ALL,
-    )
+    with when("+mpi"):
+        executable(
+            "execute-gen",
+            "{mdrun} {notunepme} -dlb {dlb} "
+            + "{verbose} -resetstep {resetstep} -nsteps {nsteps} {nstlist_args} "
+            + "-s exp_input.tpr {nb_offload} {pme_offload} "
+            + "{bonded_offload} {update_offload} {ntmpi_args} {additional_args}",
+            use_mpi=True,
+            output_capture=OUTPUT_CAPTURE.ALL,
+        )
+        executable(
+            "execute",
+            "{mdrun} {notunepme} -dlb {dlb} "
+            + "{verbose} -resetstep {resetstep} -nsteps {nsteps} {nstlist_args} "
+            + "-s {input_path} {nb_offload} {pme_offload} "
+            + "{bonded_offload} {update_offload} {ntmpi_args} {additional_args}",
+            use_mpi=True,
+            output_capture=OUTPUT_CAPTURE.ALL,
+        )
+    with when("~mpi"):
+        executable(
+            "execute-gen",
+            "{mdrun} {notunepme} -dlb {dlb} "
+            + "{verbose} -resetstep {resetstep} -nsteps {nsteps} {nstlist_args} "
+            + "-s exp_input.tpr {nb_offload} {pme_offload} "
+            + "{bonded_offload} {update_offload} {ntmpi_args} {additional_args}",
+            use_mpi=False,
+            output_capture=OUTPUT_CAPTURE.ALL,
+        )
+        executable(
+            "execute",
+            "{mdrun} {notunepme} -dlb {dlb} "
+            + "{verbose} -resetstep {resetstep} -nsteps {nsteps} {nstlist_args} "
+            + "-s {input_path} {nb_offload} {pme_offload} "
+            + "{bonded_offload} {update_offload} {ntmpi_args} {additional_args}",
+            use_mpi=False,
+            output_capture=OUTPUT_CAPTURE.ALL,
+        )
 
     input_file(
         "water_gmx50_bare",
@@ -303,6 +396,10 @@ class Gromacs(ExecutableApplication):
         workloads=[
             "water_gmx50",
             "water_bare",
+            "hecbiosim",
+            "benchpep_h",
+            "benchmem",
+            "benchrib",
             "stmv_rf",
             "stmv_pme",
             "rnase_cubic",
@@ -317,6 +414,12 @@ class Gromacs(ExecutableApplication):
         default="",
         description="Nonbonded force offload flag for mdrun",
         workload_group="all_workloads",
+    )
+    workload_variable(
+        "npme",
+        default="1",
+        description="Number of separate PME ranks for mdrun",
+        workload_group="pme_workloads",
     )
     workload_variable(
         "pme_offload",
@@ -336,62 +439,34 @@ class Gromacs(ExecutableApplication):
         description="Integration and constraints update offload flag for mdrun",
         workload_group="all_workloads",
     )
-
-    with when("+cuda"):
-        workload_variable(
-            "nb_offload",
-            default="-nb gpu",
-            description="Offload nonbonded short-range forces to GPU",
-            workload_group="all_workloads",
-        )
-        workload_variable(
-            "pme_offload",
-            default="{({n_ranks} > 1 and '-pme gpu -npme 1') or '-pme gpu'}",
-            description="Offload PME long-range electrostatics to GPU",
-            workload_group="pme_workloads",
-        )
-        workload_variable(
-            "bonded_offload",
-            default="-bonded gpu",
-            description="Offload bonded interactions to GPU",
-            workload_group="gpu_bonded_workloads",
-        )
-        workload_variable(
-            "update_offload",
-            default="-update gpu",
-            description="Offload integration and constraints to GPU",
-            workload_group="gpu_update_workloads",
-        )
-
-        environment_variable(
-            "GMX_ENABLE_DIRECT_GPU_COMM",
-            value="1",
-            description="Enable direct GPU-GPU communication",
-            workload_group="all_workloads",
-        )
-        environment_variable(
-            "GMX_GPU_DD_COMMS",
-            value="1",
-            description="Enable GPU domain-decomposition halo communication",
-            workload_group="all_workloads",
-        )
-        environment_variable(
-            "GMX_GPU_PME_PP_COMMS",
-            value="1",
-            description="Enable direct GPU PME-to-PP communication",
-            workload_group="all_workloads",
-        )
-        environment_variable(
-            "GMX_FORCE_UPDATE_DEFAULT_GPU",
-            value="1",
-            description="Default update and constraints to GPU when supported",
-            workload_group="all_workloads",
-        )
-
+    workload_variable(
+        "nstlist",
+        default="300",
+        description="Pair-list update frequency (steps) when offloading to GPU",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "nstlist_args",
+        default="",
+        description="Pair-list update interval flag for mdrun",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "ntmpi",
+        default="{n_ranks}",
+        description="Number of thread-MPI ranks for mdrun when ~mpi is used",
+        workload_group="all_workloads",
+    )
+    workload_variable(
+        "ntmpi_args",
+        default="",
+        description="Thread-MPI rank flag for mdrun",
+        workload_group="all_workloads",
+    )
     workload_variable(
         "additional_args",
         default="-noconfout",
-        description="Additiaonl Exec Args",
+        description="Additional Exec Args",
         workload_group="all_workloads",
     )
     workload_variable(
@@ -445,6 +520,125 @@ class Gromacs(ExecutableApplication):
         description="Whether to use dynamic load balancing for mdrun",
         workload_group="all_workloads",
     )
+
+    with when("~mpi"):
+        workload_variable(
+            "gmx",
+            default="gmx",
+            description="Name of the thread-MPI gromacs binary",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "ntmpi_args",
+            default="-ntmpi {ntmpi}",
+            description="Pass thread-MPI rank count to mdrun",
+            workload_group="all_workloads",
+        )
+
+    with when("+cuda"):
+        workload_variable(
+            "nb_offload",
+            default="-nb gpu",
+            description="Offload nonbonded short-range forces to GPU",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "pme_offload",
+            default="{({n_ranks} > 1 and '-pme gpu -npme {npme}') or '-pme gpu'}",
+            description="Offload PME long-range electrostatics to GPU",
+            workload_group="pme_workloads",
+        )
+        workload_variable(
+            "bonded_offload",
+            default="-bonded gpu",
+            description="Offload bonded interactions to GPU",
+            workload_group="gpu_bonded_workloads",
+        )
+        workload_variable(
+            "update_offload",
+            default="-update gpu",
+            description="Offload integration and constraints to GPU",
+            workload_group="gpu_update_workloads",
+        )
+        workload_variable(
+            "nsteps",
+            default=str(50000),
+            description="Simulation steps for GPU execution",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "notunepme",
+            default="",
+            values=["", "-notunepme"],
+            description="Enable PME auto-tuning by default on GPUs",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "dlb",
+            default="no",
+            values=["yes", "no", "auto"],
+            description="Disable dynamic load balancing by default on GPUs",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "nstlist_args",
+            default="-nstlist {nstlist}",
+            description="Set pair-list update interval for GPU execution",
+            workload_group="all_workloads",
+        )
+        workload_variable(
+            "additional_args",
+            default="-noconfout -pin on -ntomp {n_threads}",
+            description="Default additional mdrun arguments for GPU execution",
+            workload_group="all_workloads",
+        )
+
+        environment_variable(
+            "GMX_ENABLE_DIRECT_GPU_COMM",
+            value="1",
+            description="Enable direct GPU-GPU communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_FORCE_GPU_AWARE_MPI",
+            value="1",
+            description="Force GPU-aware MPI communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_GPU_DD_COMMS",
+            value="1",
+            description="Enable GPU domain-decomposition halo communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_GPU_PME_PP_COMMS",
+            value="1",
+            description="Enable direct GPU PME-to-PP communication",
+            workload_group="all_workloads",
+        )
+        environment_variable(
+            "GMX_FORCE_UPDATE_DEFAULT_GPU",
+            value="1",
+            description="Default update and constraints to GPU when supported",
+            workload_group="all_workloads",
+        )
+
+    with when("+cufftmp"):
+        environment_variable(
+            "GMX_GPU_PME_DECOMPOSITION",
+            value="1",
+            description="Enable multi-GPU PME decomposition with cuFFTMp",
+            workload_group="pme_workloads",
+        )
+
+    with when("+nvshmem"):
+        environment_variable(
+            "GMX_ENABLE_NVSHMEM",
+            value="1",
+            description="Enable NVSHMEM for GPU communication",
+            workload_group="all_workloads",
+        )
 
     workload_variable(
         "size",
