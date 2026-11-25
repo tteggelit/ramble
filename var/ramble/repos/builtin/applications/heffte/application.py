@@ -29,6 +29,19 @@ class Heffte(ExecutableApplication):
     version("2.1.0", "Version 2.1.0 of the heFFTe library")
 
     with when("package_manager_family=spack"):
+        define_compiler(
+            "gcc14",
+            pkg_spec="gcc@14.2.0",
+            when=["~nvhpc"],
+        )
+
+        define_compiler(
+            "nvhpc",
+            pkg_spec="nvhpc +mpi",
+            compiler_spec="nvhpc",
+            when=["+nvhpc"],
+        )
+
         software_spec(
             "intel-mpi",
             pkg_spec="intel-oneapi-mpi@2021.17.2",
@@ -36,18 +49,31 @@ class Heffte(ExecutableApplication):
         )
 
         software_spec(
-            "openmpi",
-            pkg_spec="openmpi",
+            "nvhpc-mpi",
+            pkg_spec="nvhpc +mpi",
             when=["+nvhpc"],
+        )
+
+        _heffte_pkg_spec = (
+            "heffte@{application::heffte::version} "
+            + "{application::variant::benchmarks} "
+            + "{application::variant::fftw} "
+            + "{application::variant::cuda} "
+            + "{application::variant::mkl}"
         )
 
         software_spec(
             "heffte-{application::heffte::version}",
-            pkg_spec="heffte@{application::heffte::version} "
-            + "{application::variant::benchmarks} "
-            + "{application::variant::fftw} "
-            + "{application::variant::cuda} "
-            + "{application::variant::mkl}",
+            pkg_spec=_heffte_pkg_spec,
+            compiler="gcc14",
+            when=["~nvhpc"],
+        )
+
+        software_spec(
+            "heffte-{application::heffte::version}-nvhpc",
+            pkg_spec=_heffte_pkg_spec,
+            compiler="nvhpc",
+            when=["+nvhpc"],
         )
 
         required_package("heffte")
@@ -77,7 +103,7 @@ class Heffte(ExecutableApplication):
         "nvhpc",
         default=False,
         values=[True, False],
-        description="NVIDIA HPC SDK support variant",
+        description="Use NVIDIA HPC SDK compiler (%nvhpc) and bundled GPU-aware MPI (nvhpc +mpi)",
     )
 
     with when("+nvhpc"):
@@ -315,6 +341,17 @@ class Heffte(ExecutableApplication):
     )
 
     with when("+cuda"):
+        # Upstream convolution.cpp only supports CPU backends (stock, fftw,
+        # and mkl), so scope the cufft default strictly to 3d_workloads.
+        workload_variable(
+            "fft",
+            default="cufft",
+            values=["cufft", "fftw", "mkl", "onemkl", "rocfft", "stock"],
+            strict=True,
+            description="FFT library backend",
+            workload_group="3d_workloads",
+        )
+
         workload_variable(
             "mps",
             default="-mps",

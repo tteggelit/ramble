@@ -51,7 +51,7 @@ class Relion(ExecutableApplication):
         "nvhpc",
         default=False,
         values=[True, False],
-        description="NVIDIA HPC SDK support variant",
+        description="Use NVIDIA HPC SDK compiler (%nvhpc) and bundled GPU-aware MPI (nvhpc +mpi)",
     )
 
     with when("+nvhpc"):
@@ -94,15 +94,15 @@ class Relion(ExecutableApplication):
         description="Double precision GPU code",
     )
 
-    variant(
-        "python",
-        default=False,
-        values=[True, False],
-        description="Include py-relion Python tools for RELION 5+",
-    )
-
     with when("package_manager_family=spack"):
         define_compiler("gcc14", pkg_spec="gcc@14.2.0")
+
+        define_compiler(
+            "nvhpc",
+            pkg_spec="nvhpc +mpi",
+            compiler_spec="nvhpc",
+            when=["+nvhpc"],
+        )
 
         software_spec(
             "intel-mpi",
@@ -111,90 +111,105 @@ class Relion(ExecutableApplication):
         )
 
         software_spec(
-            "openmpi",
-            pkg_spec="openmpi",
+            "nvhpc-mpi",
+            pkg_spec="nvhpc +mpi",
             when=["+nvhpc"],
         )
 
-        with default_args(compiler="gcc14"):
-            software_spec(
-                "wxwidgets",
-                pkg_spec="wxwidgets ~gui",
-            )
+        # `ctffind` (a transitive runtime dependency of `relion`) depends on
+        # `wxwidgets`, whose default `+gui` pulls in `gtkplus`/X11. Keeping
+        # `wxwidgets ~gui` as a separate `software_spec` compiled with `gcc14`
+        # (rather than inlining `^wxwidgets ~gui` into `relion`'s `pkg_spec`)
+        # avoids pulling in GUI libraries while letting `spack-lightweight`
+        # safely append `%{compiler}` to the end of each `pkg_spec`.
+        software_spec(
+            "wxwidgets",
+            pkg_spec="wxwidgets ~gui",
+            compiler="gcc14",
+        )
 
-            with when("application_version@5.0.0:"):
-                with when("~altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui ~ghostscript "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft} "
-                        + "{application::variant::python}",
-                    )
+        # Note: In Spack, building `relion +cuda` raises ValueError unless
+        # `cuda_arch` is explicitly set (e.g., `cuda_arch=80` / `90`).
+        for comp_when, comp_name, comp_suffix in (
+            ("~nvhpc", "gcc14", ""),
+            ("+nvhpc", "nvhpc", "-nvhpc"),
+        ):
+            with when(comp_when):
+                with default_args(compiler=comp_name):
+                    with when("application_version@5.0.0:"):
+                        with when("~altcpu"):
+                            software_spec(
+                                f"relion-{{application::relion::version}}{comp_suffix}",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui ~ghostscript "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
-                with when("+altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui ~ghostscript "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::altcpu} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft} "
-                        + "{application::variant::python}",
-                    )
+                        with when("+altcpu"):
+                            software_spec(
+                                f"relion-{{application::relion::version}}{comp_suffix}-altcpu",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui ~ghostscript "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::altcpu} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
-            with when("application_version@4.0.0:4.0.1"):
-                with when("~altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui ~ghostscript "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft}",
-                    )
+                    # Upstream released RELION 4.0.2 on 2024-08-21, but it is not
+                    # currently packaged in Spack. If 4.0.2 (or later 4.x) is added
+                    # to Spack, check whether this range should be widened to include it.
+                    with when("application_version@4.0.0:4.0.1"):
+                        with when("~altcpu"):
+                            software_spec(
+                                f"relion4-{{application::relion::version}}{comp_suffix}",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui ~ghostscript "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
-                with when("+altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui ~ghostscript "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::altcpu} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft}",
-                    )
+                        with when("+altcpu"):
+                            software_spec(
+                                f"relion4-{{application::relion::version}}{comp_suffix}-altcpu",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui ~ghostscript "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::altcpu} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
-            with when("application_version@:3.1.4"):
-                with when("~altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft}",
-                    )
+                    with when("application_version@:3.1.4"):
+                        with when("~altcpu"):
+                            software_spec(
+                                f"relion3-{{application::relion::version}}{comp_suffix}",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
-                with when("+altcpu"):
-                    software_spec(
-                        "relion-{application::relion::version}",
-                        pkg_spec="relion@{application::relion::version} "
-                        + "~gui "
-                        + "{application::variant::cuda} "
-                        + "{application::variant::altcpu} "
-                        + "{application::variant::double} "
-                        + "{application::variant::double-gpu} "
-                        + "{application::variant::mklfft}",
-                    )
+                        with when("+altcpu"):
+                            software_spec(
+                                f"relion3-{{application::relion::version}}{comp_suffix}-altcpu",
+                                pkg_spec="relion@{application::relion::version} "
+                                + "~gui "
+                                + "{application::variant::cuda} "
+                                + "{application::variant::altcpu} "
+                                + "{application::variant::double} "
+                                + "{application::variant::double-gpu} "
+                                + "{application::variant::mklfft}",
+                            )
 
         required_package("relion")
 
@@ -207,7 +222,7 @@ class Relion(ExecutableApplication):
 
     executable(
         "print-version",
-        template="relion_refine --version",
+        template="{relion_version_bin} --version",
         use_mpi=False,
         output_capture=OUTPUT_CAPTURE.ALL,
     )
@@ -370,6 +385,13 @@ class Relion(ExecutableApplication):
         "relion_bin",
         default="relion_refine_mpi",
         description="RELION refinement executable name",
+        workload_group="all_workloads",
+    )
+
+    workload_variable(
+        "relion_version_bin",
+        default="relion_refine",
+        description="Serial RELION binary used to query version info without invoking MPI",
         workload_group="all_workloads",
     )
 
@@ -580,7 +602,21 @@ class Relion(ExecutableApplication):
         fom_type=FomType.MEASURE,
     )
 
+    # relion_refine_mpi requires >= 2 ranks (1 leader + >= 1 worker) for
+    # class2d/class3d, and >= 3 (odd) ranks for refine3d (--split_random_halves
+    # keeps 1 leader plus an equal split across two half-sets).
     with when("workload_group=classification_workloads"):
+        register_validator(
+            name="min_mpi_ranks",
+            predicate="{n_ranks} >= 2",
+            message=(
+                "RELION {workload_name} uses relion_refine_mpi which requires "
+                "at least 2 MPI ranks (1 leader + >= 1 worker), got "
+                "n_ranks = {n_ranks}"
+            ),
+            fail_on_invalid=True,
+        )
+
         success_criteria(
             "Completed Iterations",
             mode="fom_comparison",
@@ -588,7 +624,18 @@ class Relion(ExecutableApplication):
             formula="int({value}) == int({n_iter})",
         )
 
-    with when("workload=refine3d"):
+    with when("workload_name=refine3d"):
+        register_validator(
+            name="refine3d_mpi_ranks",
+            predicate="{n_ranks} >= 3 and {n_ranks} % 2 == 1",
+            message=(
+                "RELION refine3d with --split_random_halves requires an odd "
+                "number of MPI ranks >= 3 (1 leader + equal split across two "
+                "halves), got n_ranks = {n_ranks}"
+            ),
+            fail_on_invalid=True,
+        )
+
         success_criteria(
             "Completed Iterations",
             mode="fom_comparison",
@@ -605,13 +652,19 @@ class Relion(ExecutableApplication):
 
     # Rejects fatal error banners such as:
     #   "in: /path/to/src/file.cpp, line 123\nERROR: ..." or "=== RELION_ERROR ==="
+    # Note: Ramble's string success_criteria uses re.match() (anchored at start
+    # of line), so `.*` is required before RELION_ERROR.
     success_criteria(
         "No RELION Fatal Error",
         mode="string",
-        anti_match=r"(?:RELION_ERROR|^ERROR:)",
+        anti_match=r"(?:.*RELION_ERROR|^ERROR:)",
     )
 
     archive_pattern("{experiment_run_dir}/{output_prefix}_it*_optimiser.star")
+    archive_pattern(
+        "{experiment_run_dir}/{output_prefix}_optimiser.star",
+        when=["workload_name=refine3d"],
+    )
     archive_pattern("{experiment_run_dir}/{output_prefix}*_model.star")
 
     def _prepare_analysis(self, workspace, app_inst=None):
@@ -653,12 +706,15 @@ class Relion(ExecutableApplication):
                     if current_iter is not None:
                         m_prog = progress_done_re.match(line)
                         if m_prog:
-                            val = float(m_prog.group("total"))
+                            val = float(m_prog.group("elapsed"))
                             unit = m_prog.group("unit")
                             e_step_times[current_iter] = val * unit_scale[unit]
                             current_iter = None
 
-        # Compute full iteration wall times from checkpoint *_itNNN_optimiser.star mtimes if available
+        # Compute full iteration wall times from checkpoint *_itNNN_optimiser.star
+        # mtimes if available. Caveat: Ramble's `archive` uses `shutil.copy`,
+        # which does not preserve file mtimes; re-analyzing archived checkpoints
+        # therefore yields zero/near-zero deltas and loses true wall times.
         iter_mtimes = {}
         star_pattern = os.path.join(
             exp_dir, f"{output_prefix}_it*_optimiser.star"
@@ -677,16 +733,23 @@ class Relion(ExecutableApplication):
         for it in sorted(iter_mtimes.keys()):
             if it > 0 and (it - 1) in iter_mtimes:
                 dt = iter_mtimes[it] - iter_mtimes[it - 1]
-                if dt >= 0.0:
+                # Guard against identical timestamps (e.g., copied/archived files)
+                if dt > 0.0:
                     iter_wall_times[it] = dt
 
         # Extract _rlnCurrentResolution from final model.star
         final_res = None
-        n_iter_str = self.expander.expand_var_name("n_iter")
-        if n_iter_str.isdigit():
-            model_file = f"{output_prefix}_it{int(n_iter_str):03d}_model.star"
-        else:
+        workload_name = self.expander.expand_var_name("workload_name")
+        if workload_name == "refine3d":
             model_file = f"{output_prefix}_model.star"
+        else:
+            n_iter_str = self.expander.expand_var_name("n_iter")
+            if n_iter_str.isdigit():
+                model_file = (
+                    f"{output_prefix}_it{int(n_iter_str):03d}_model.star"
+                )
+            else:
+                model_file = f"{output_prefix}_model.star"
         model_path = os.path.join(exp_dir, model_file)
         if os.path.isfile(model_path):
             with open(model_path, encoding="utf-8") as mf:
@@ -696,11 +759,11 @@ class Relion(ExecutableApplication):
                         final_res = m_sr.group("res")
                         break
 
+        stats_path = os.path.join(exp_dir, "relion_stats.out")
         all_iters = sorted(
             set(e_step_times.keys()) | set(iter_wall_times.keys())
         )
         if all_iters and os.path.isdir(exp_dir):
-            stats_path = os.path.join(exp_dir, "relion_stats.out")
             with open(stats_path, "w+", encoding="utf-8") as f:
                 for it in all_iters:
                     e_val = e_step_times.get(it, 0.0)
@@ -726,3 +789,5 @@ class Relion(ExecutableApplication):
 
                 if final_res is not None:
                     f.write(f"Final resolution: {final_res} Angstroms\n")
+        elif os.path.isfile(stats_path):
+            os.remove(stats_path)
