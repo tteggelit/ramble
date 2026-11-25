@@ -575,6 +575,12 @@ def test_gromacs_variant_conflicts(workspace_name, app_spec, variants):
             workspace("setup", "--dry-run", global_args=global_args)
 
 
+_GMX_FATAL_FOOTER = (
+    "For more information and tips for troubleshooting, please check the GROMACS\n"
+    "website at https://manual.gromacs.org/current/user-guide/run-time-errors.html\n"
+)
+
+
 @pytest.mark.parametrize(
     "exp_name,out_text,md_log_text,expected_status",
     [
@@ -592,28 +598,40 @@ def test_gromacs_variant_conflicts(workspace_name, app_spec, variants):
         ),
         (
             "fatal_pme_tuning",
-            "Precision:           mixed\nFatal error:\nPME tuning was still active\n",
+            "Precision:           mixed\nFatal error:\nPME tuning was still active\n"
+            + _GMX_FATAL_FOOTER,
             "Performance:      518.148        0.046\n",
             "FAILED",
         ),
         (
-            "error_in_user_input",
-            "Precision:           mixed\nError in user input:\nFile 'exp_input.tpr' does not exist\n",
+            "simulation_instability",
+            "Precision:           mixed\nSimulation instability detected:\nLINCS WARNING\n"
+            + _GMX_FATAL_FOOTER,
             "Performance:      518.148        0.046\n",
             "FAILED",
         ),
         (
-            "inconsistent_bonded_gpu",
-            "Precision:           mixed\nInconsistency in user input:\nBonded interactions can not be computed on a GPU\n",
+            "slurm_rank_prefixed_fatal",
+            "0: Precision:           mixed\n0: Inconsistency in user input:\n"
+            "0: For more information and tips for troubleshooting, please check the GROMACS\n",
             "Performance:      518.148        0.046\n",
             "FAILED",
         ),
         (
-            "internal_cufftmp_bug",
-            "Precision:           mixed\nInternal error (bug):\ncufftMakePlan3d R2C plan failure (error code 5)\n",
+            "ompi_tagged_fatal",
+            "[1,0]<stderr>:Internal error (bug):\n"
+            "[1,0]<stderr>:For more information and tips for troubleshooting, please check the GROMACS\n",
             "Performance:      518.148        0.046\n",
             "FAILED",
         ),
+    ],
+    ids=[
+        "healthy_run",
+        "missing_perf_only_binary_info",
+        "fatal_pme_tuning",
+        "simulation_instability",
+        "slurm_rank_prefixed_fatal",
+        "ompi_tagged_fatal",
     ],
 )
 def test_gromacs_success_criteria(

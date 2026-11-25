@@ -644,3 +644,46 @@ def test_relion_refine3d_converged_final_iteration_wall_time(workspace_name):
         assert float(
             null_foms["Total iteration wall time"]["value"]
         ) == pytest.approx(50.0)
+
+        # Even if the log has no E-step iterations, do not invent Iteration 3 from run_optimiser.star
+        with open(
+            os.path.join(run_dir, "converged_exp.out"), "w", encoding="utf-8"
+        ) as f:
+            f.write("RELION version: 5.0.1\n")
+
+        workspace("analyze", "-f", "json", global_args=global_args)
+        with open(result_file, encoding="utf-8") as f:
+            results = json.load(f)
+        contexts = {
+            ctx["name"]: ctx for ctx in results["experiments"][0]["CONTEXTS"]
+        }
+        assert "Iteration 3" not in contexts
+
+        # RELION 3.x fallback: when run_optimiser.star is absent, use run_model.star mtime
+        os.remove(star_it2)
+        os.remove(os.path.join(run_dir, "run_optimiser.star"))
+        os.utime(os.path.join(run_dir, "run_model.star"), (1075.0, 1075.0))
+        with open(
+            os.path.join(run_dir, "converged_exp.out"), "w", encoding="utf-8"
+        ) as f:
+            f.write(
+                " Expectation iteration 1\n"
+                '   2/   2 sec ............................................................~~(,_,"> yum!\n'
+                " Expectation iteration 2\n"
+                '   7/   4 sec ............................................................~~(,_,"> yum!\n'
+            )
+
+        workspace("analyze", "-f", "json", global_args=global_args)
+        with open(result_file, encoding="utf-8") as f:
+            results = json.load(f)
+        contexts = {
+            ctx["name"]: ctx for ctx in results["experiments"][0]["CONTEXTS"]
+        }
+        null_foms = {f["name"]: f for f in contexts["null"]["foms"]}
+        assert float(
+            null_foms["Total iteration wall time"]["value"]
+        ) == pytest.approx(75.0)
+        it2_foms = {f["name"]: f for f in contexts["Iteration 2"]["foms"]}
+        assert float(
+            it2_foms["Iteration wall time"]["value"]
+        ) == pytest.approx(64.75)

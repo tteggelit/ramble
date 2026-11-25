@@ -152,6 +152,7 @@ ramble:
                     f.write("               Core t (s)   Wall t (s)        (%)\n")
                     f.write(f"       Time:       {r}{r}.{r}{r}{r}       {r}.{r}{r}{r}    1000.1\n")
                     f.write("                 (ns/day)    (hour/ns)\n")
+                    f.write(f"Performance:      {r}00.000        0.{r}00\n")
 
             # Test that the number of repeats is not exceeded
             excess_repeat_exp_dir = f"{base_exp_dir}.{repeats + 1}"

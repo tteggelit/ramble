@@ -730,17 +730,21 @@ class Relion(ExecutableApplication):
                 iter_mtimes[int(m_star.group("iter"))] = os.path.getmtime(path)
 
         workload_name = self.expander.expand_var_name("workload_name")
-        if workload_name == "refine3d":
+        if workload_name == "refine3d" and iter_mtimes and e_step_times:
             # On convergence, refine3d writes `{output_prefix}_optimiser.star`
-            # instead of `{output_prefix}_itNNN_optimiser.star` for the final
-            # iteration (including the gold-standard full maximization).
-            final_opt = os.path.join(
-                exp_dir, f"{output_prefix}_optimiser.star"
-            )
-            if os.path.isfile(final_opt) and iter_mtimes:
-                next_iter = max(iter_mtimes.keys()) + 1
-                if not e_step_times or next_iter == max(e_step_times.keys()):
-                    iter_mtimes[next_iter] = os.path.getmtime(final_opt)
+            # (RELION 3.2+) and `{output_prefix}_model.star` instead of
+            # `{output_prefix}_itNNN_optimiser.star` for the final iteration
+            # (including the gold-standard full maximization).
+            next_iter = max(iter_mtimes.keys()) + 1
+            if next_iter == max(e_step_times.keys()):
+                for fname in (
+                    f"{output_prefix}_optimiser.star",
+                    f"{output_prefix}_model.star",
+                ):
+                    final_star = os.path.join(exp_dir, fname)
+                    if os.path.isfile(final_star):
+                        iter_mtimes[next_iter] = os.path.getmtime(final_star)
+                        break
 
         iter_wall_times = {}
         for it in sorted(iter_mtimes.keys()):

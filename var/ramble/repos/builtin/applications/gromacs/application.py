@@ -562,11 +562,15 @@ class Gromacs(ExecutableApplication):
         description="Set to empty string to run without verbose mode",
         workload_group="all_workloads",
     )
+    # Keep `-notunepme` by default (including on GPUs) to avoid fatal
+    # PME-tuning vs. `-resetstep` aborts on shorter runs or high-throughput
+    # GPUs; unset (`notunepme: ''`) in workspace configs for long
+    # performance-tuned runs.
     workload_variable(
         "notunepme",
         default="-notunepme",
         values=["", "-notunepme"],
-        description="Whether to set -notunepme for mdrun",
+        description="Disable PME auto-tuning by default (set empty string to enable tuning on long runs)",
         workload_group="all_workloads",
     )
     workload_variable(
@@ -657,16 +661,6 @@ class Gromacs(ExecutableApplication):
             "nsteps",
             default=str(50000),
             description="Simulation steps for GPU execution",
-            workload_group="all_workloads",
-        )
-        # Keep `-notunepme` by default on GPUs to avoid fatal PME-tuning vs.
-        # `-resetstep` aborts on shorter runs or high-throughput GPUs; unset
-        # (`notunepme: ''`) in workspace configs for long performance-tuned runs.
-        workload_variable(
-            "notunepme",
-            default="-notunepme",
-            values=["", "-notunepme"],
-            description="Disable PME auto-tuning by default (set empty string to enable tuning on long GPU runs)",
             workload_group="all_workloads",
         )
         workload_variable(
@@ -955,15 +949,16 @@ class Gromacs(ExecutableApplication):
         formula="float({value}) > 0",
     )
 
-    # Reject fatal error banners written by gmx mdrun / grompp to stdout/stderr.
-    # Note: Ramble's string success_criteria uses re.match() (anchored at start
-    # of line).
+    # Reject any fatal error emitted by gmx mdrun / grompp (gmx_fatal,
+    # GromacsException, and GMX_ASSERT all invoke printFatalErrorFooter()).
+    # Leading `.*` handles MPI/Slurm rank prefixes (e.g., `srun --label`)
+    # since Ramble's string success_criteria uses re.match().
     success_criteria(
         "No GROMACS Fatal Error",
         mode="string",
         anti_match=(
-            r"^(?:Fatal error:|Error in user input:"
-            r"|Inconsistency in user input:|Internal error \(bug\):)"
+            r".*For more information and tips for troubleshooting,"
+            r" please check the GROMACS"
         ),
     )
 
