@@ -561,3 +561,86 @@ def test_relion_spack_nvhpc_concretize(workspace_name):
             "relion-{application::relion::version}-nvhpc"
             in envs["env_relion_nvhpc"]["packages"]
         )
+
+
+def test_relion_refine3d_converged_final_iteration_wall_time(workspace_name):
+    """Verify refine3d maps run_optimiser.star mtime to the final converged iteration."""
+    global_args = ["-w", workspace_name]
+    with ramble.workspace.create(workspace_name) as ws:
+        _setup_relion_exp(
+            workspace_name,
+            "refine3d",
+            exp_name="converged_exp",
+            extra_vars=["processes_per_node=3"],
+        )
+        workspace("setup", "--dry-run", global_args=global_args)
+
+        run_dir = os.path.join(
+            ws.experiment_dir, "relion", "refine3d", "converged_exp"
+        )
+        with open(
+            os.path.join(run_dir, "converged_exp.out"), "w", encoding="utf-8"
+        ) as f:
+            f.write(
+                " Expectation iteration 1\n"
+                '   2/   2 sec ............................................................~~(,_,"> yum!\n'
+                " Expectation iteration 2\n"
+                '   7/   4 sec ............................................................~~(,_,"> yum!\n'
+            )
+        with open(
+            os.path.join(run_dir, "run_model.star"), "w", encoding="utf-8"
+        ) as f:
+            f.write("_rlnCurrentResolution 16.634484\n")
+
+        # Converged refine3d writes run_it000, run_it001, and run_optimiser.star (no run_it002)
+        for fname, ts in (
+            ("run_it000_optimiser.star", 1000.0),
+            ("run_it001_optimiser.star", 1010.25),
+            ("run_optimiser.star", 1090.0),
+        ):
+            star = os.path.join(run_dir, fname)
+            with open(star, "w", encoding="utf-8") as f:
+                f.write("data_\n")
+            os.utime(star, (ts, ts))
+
+        workspace("analyze", "-f", "json", global_args=global_args)
+        result_file = os.path.join(ws.results_dir, "results.latest.json")
+        with open(result_file, encoding="utf-8") as f:
+            results = json.load(f)
+
+        exp_res = results["experiments"][0]
+        assert exp_res["RAMBLE_STATUS"] == "SUCCESS"
+        contexts = {ctx["name"]: ctx for ctx in exp_res["CONTEXTS"]}
+        null_foms = {f["name"]: f for f in contexts["null"]["foms"]}
+        assert int(null_foms["Completed iterations"]["value"]) == 2
+        assert float(
+            null_foms["Total iteration wall time"]["value"]
+        ) == pytest.approx(90.0)
+
+        it1_foms = {f["name"]: f for f in contexts["Iteration 1"]["foms"]}
+        it2_foms = {f["name"]: f for f in contexts["Iteration 2"]["foms"]}
+        assert float(
+            it1_foms["Iteration wall time"]["value"]
+        ) == pytest.approx(10.25)
+        assert float(
+            it2_foms["Iteration wall time"]["value"]
+        ) == pytest.approx(79.75)
+
+        # If run_it002_optimiser.star also exists, do not invent a spurious Iteration 3
+        star_it2 = os.path.join(run_dir, "run_it002_optimiser.star")
+        with open(star_it2, "w", encoding="utf-8") as f:
+            f.write("data_\n")
+        os.utime(star_it2, (1050.0, 1050.0))
+
+        workspace("analyze", "-f", "json", global_args=global_args)
+        with open(result_file, encoding="utf-8") as f:
+            results = json.load(f)
+        contexts = {
+            ctx["name"]: ctx for ctx in results["experiments"][0]["CONTEXTS"]
+        }
+        null_foms = {f["name"]: f for f in contexts["null"]["foms"]}
+        assert int(null_foms["Completed iterations"]["value"]) == 2
+        assert "Iteration 3" not in contexts
+        assert float(
+            null_foms["Total iteration wall time"]["value"]
+        ) == pytest.approx(50.0)

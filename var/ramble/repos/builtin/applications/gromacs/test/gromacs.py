@@ -6,6 +6,7 @@
 # option. This file may not be copied, modified, or distributed
 # except according to those terms.
 
+import json
 import os
 
 import pytest
@@ -133,9 +134,11 @@ def test_gromacs_cuda_pme_vs_rf(workspace_name):
         bare_rf_4 = _read_script(ws, "gromacs", "water_bare", "bare_rf_4")
         assert "-pme gpu" not in bare_rf_4
         assert "-npme" not in bare_rf_4
+        assert "-bonded gpu" not in bare_rf_4
 
         bare_pme_4 = _read_script(ws, "gromacs", "water_bare", "bare_pme_4")
         assert "-pme gpu -npme 1" in bare_pme_4
+        assert "-bonded gpu" not in bare_pme_4
 
         ligno_4 = _read_script(ws, "gromacs", "lignocellulose", "ligno_4")
         assert "-nb gpu" in ligno_4
@@ -462,7 +465,7 @@ def test_gromacs_gpu_aware_mpi_gating(workspace_name):
 
 
 def test_gromacs_additional_args_decoupled(workspace_name):
-    """Verify additional_args is decoupled from confout_args, pin_args, and ntomp_args."""
+    """Verify additional_args is decoupled from confout_args, pin_args, ntomp_args, and notunepme."""
     global_args = ["-w", workspace_name]
     with ramble.workspace.create(workspace_name) as ws:
         _add_gromacs_exp(
@@ -501,10 +504,18 @@ def test_gromacs_additional_args_decoupled(workspace_name):
             ],
             variants=["cuda=true"],
         )
+        _add_gromacs_exp(
+            workspace_name,
+            "water_gmx50",
+            exp_name="gpu_tunepme",
+            extra_vars=["processes_per_node=1", "n_threads=4", "notunepme="],
+            variants=["cuda=true"],
+        )
         workspace("setup", "--dry-run", global_args=global_args)
 
         cpu_default = _read_script(ws, "gromacs", "water_gmx50", "cpu_default")
         assert "-noconfout" in cpu_default
+        assert "-notunepme" in cpu_default
         assert "-pin on" not in cpu_default
         assert "-ntomp" not in cpu_default
 
@@ -514,6 +525,7 @@ def test_gromacs_additional_args_decoupled(workspace_name):
         assert "-ntomp 4" in gpu_custom
         assert "-pin on" in gpu_custom
         assert "-noconfout" in gpu_custom
+        assert "-notunepme" in gpu_custom
         assert "-maxh 0.5" in gpu_custom
 
         gpu_no_pin = _read_script(ws, "gromacs", "water_gmx50", "gpu_no_pin")
@@ -527,6 +539,10 @@ def test_gromacs_additional_args_decoupled(workspace_name):
         assert "-ntomp 4" in gpu_keep
         assert "-pin on" in gpu_keep
         assert "-noconfout" not in gpu_keep
+
+        gpu_tunepme = _read_script(ws, "gromacs", "water_gmx50", "gpu_tunepme")
+        assert "-ntomp 4" in gpu_tunepme
+        assert "-notunepme" not in gpu_tunepme
 
 
 @pytest.mark.parametrize(
@@ -557,3 +573,77 @@ def test_gromacs_variant_conflicts(workspace_name, app_spec, variants):
         )
         with pytest.raises(ramble.error.ObjectValidationError):
             workspace("setup", "--dry-run", global_args=global_args)
+
+
+@pytest.mark.parametrize(
+    "exp_name,out_text,md_log_text,expected_status",
+    [
+        (
+            "healthy_run",
+            "Precision:           mixed\n",
+            "Performance:      518.148        0.046\n",
+            "SUCCESS",
+        ),
+        (
+            "missing_perf_only_binary_info",
+            "Precision:           mixed\nGPU support:         CUDA\n",
+            "Started mdrun on rank 0\n",
+            "FAILED",
+        ),
+        (
+            "fatal_pme_tuning",
+            "Precision:           mixed\nFatal error:\nPME tuning was still active\n",
+            "Performance:      518.148        0.046\n",
+            "FAILED",
+        ),
+        (
+            "error_in_user_input",
+            "Precision:           mixed\nError in user input:\nFile 'exp_input.tpr' does not exist\n",
+            "Performance:      518.148        0.046\n",
+            "FAILED",
+        ),
+        (
+            "inconsistent_bonded_gpu",
+            "Precision:           mixed\nInconsistency in user input:\nBonded interactions can not be computed on a GPU\n",
+            "Performance:      518.148        0.046\n",
+            "FAILED",
+        ),
+        (
+            "internal_cufftmp_bug",
+            "Precision:           mixed\nInternal error (bug):\ncufftMakePlan3d R2C plan failure (error code 5)\n",
+            "Performance:      518.148        0.046\n",
+            "FAILED",
+        ),
+    ],
+)
+def test_gromacs_success_criteria(
+    workspace_name, exp_name, out_text, md_log_text, expected_status
+):
+    """Verify Gromacs success_criteria require positive performance and no fatal errors."""
+    global_args = ["-w", workspace_name]
+    with ramble.workspace.create(workspace_name) as ws:
+        _add_gromacs_exp(
+            workspace_name,
+            "water_gmx50",
+            exp_name=exp_name,
+            extra_vars=["processes_per_node=1"],
+            variants=["cuda=true"],
+        )
+        workspace("setup", "--dry-run", global_args=global_args)
+
+        run_dir = os.path.join(
+            ws.experiment_dir, "gromacs", "water_gmx50", exp_name
+        )
+        with open(
+            os.path.join(run_dir, f"{exp_name}.out"), "w", encoding="utf-8"
+        ) as f:
+            f.write(out_text)
+        with open(os.path.join(run_dir, "md.log"), "w", encoding="utf-8") as f:
+            f.write(md_log_text)
+
+        workspace("analyze", "-f", "json", global_args=global_args)
+        result_file = os.path.join(ws.results_dir, "results.latest.json")
+        with open(result_file, encoding="utf-8") as f:
+            results = json.load(f)
+
+        assert results["experiments"][0]["RAMBLE_STATUS"] == expected_status

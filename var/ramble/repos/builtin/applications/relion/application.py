@@ -729,6 +729,19 @@ class Relion(ExecutableApplication):
             if m_star and os.path.isfile(path):
                 iter_mtimes[int(m_star.group("iter"))] = os.path.getmtime(path)
 
+        workload_name = self.expander.expand_var_name("workload_name")
+        if workload_name == "refine3d":
+            # On convergence, refine3d writes `{output_prefix}_optimiser.star`
+            # instead of `{output_prefix}_itNNN_optimiser.star` for the final
+            # iteration (including the gold-standard full maximization).
+            final_opt = os.path.join(
+                exp_dir, f"{output_prefix}_optimiser.star"
+            )
+            if os.path.isfile(final_opt) and iter_mtimes:
+                next_iter = max(iter_mtimes.keys()) + 1
+                if not e_step_times or next_iter == max(e_step_times.keys()):
+                    iter_mtimes[next_iter] = os.path.getmtime(final_opt)
+
         iter_wall_times = {}
         for it in sorted(iter_mtimes.keys()):
             if it > 0 and (it - 1) in iter_mtimes:
@@ -739,7 +752,6 @@ class Relion(ExecutableApplication):
 
         # Extract _rlnCurrentResolution from final model.star
         final_res = None
-        workload_name = self.expander.expand_var_name("workload_name")
         if workload_name == "refine3d":
             model_file = f"{output_prefix}_model.star"
         else:

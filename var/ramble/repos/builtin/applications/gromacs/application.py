@@ -415,7 +415,6 @@ class Gromacs(ExecutableApplication):
     workload_group(
         "gpu_bonded_workloads",
         workloads=[
-            "water_bare",
             "lignocellulose",
             "hecbiosim",
             "benchpep",
@@ -660,11 +659,14 @@ class Gromacs(ExecutableApplication):
             description="Simulation steps for GPU execution",
             workload_group="all_workloads",
         )
+        # Keep `-notunepme` by default on GPUs to avoid fatal PME-tuning vs.
+        # `-resetstep` aborts on shorter runs or high-throughput GPUs; unset
+        # (`notunepme: ''`) in workspace configs for long performance-tuned runs.
         workload_variable(
             "notunepme",
-            default="",
+            default="-notunepme",
             values=["", "-notunepme"],
-            description="Enable PME auto-tuning by default on GPUs",
+            description="Disable PME auto-tuning by default (set empty string to enable tuning on long GPU runs)",
             workload_group="all_workloads",
         )
         workload_variable(
@@ -945,6 +947,25 @@ class Gromacs(ExecutableApplication):
                 units="",
                 fom_type=FomType.INFO,
             )
+
+    success_criteria(
+        "Performance Reported",
+        mode="fom_comparison",
+        fom_name="Nanosecs per day",
+        formula="float({value}) > 0",
+    )
+
+    # Reject fatal error banners written by gmx mdrun / grompp to stdout/stderr.
+    # Note: Ramble's string success_criteria uses re.match() (anchored at start
+    # of line).
+    success_criteria(
+        "No GROMACS Fatal Error",
+        mode="string",
+        anti_match=(
+            r"^(?:Fatal error:|Error in user input:"
+            r"|Inconsistency in user input:|Internal error \(bug\):)"
+        ),
+    )
 
     @property
     def selected_environment_variables(self):
